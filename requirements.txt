@@ -1,0 +1,5 @@
+# Python 3.12. torch/torchvision come with ultralytics (CPU build on Windows;
+# Colab keeps its own CUDA build).
+ultralytics==8.4.174
+lap==0.5.13
+pyyaml==6.0.3

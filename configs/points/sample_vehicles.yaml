@@ -1,0 +1,13 @@
+# Punto de cámara: video de ejemplo data/samples/vehicles.mp4 (3840x2160).
+# Coordenadas en píxeles del video original. Para un punto nuevo: sacar un
+# cuadro, abrirlo en un editor de imágenes y leer las coordenadas.
+#
+# Caminando de `start` a `end` (visto en pantalla), cruzar al lado derecho es
+# `to_right`. Con una línea horizontal de izquierda a derecha: to_right = baja
+# en la imagen.
+lines:
+  - name: main
+    start: [0, 1300]
+    end: [3840, 1300]
+    to_right: toward_camera     # calzada izquierda, vienen hacia la cámara
+    to_left: away_from_camera   # calzada derecha, se alejan
