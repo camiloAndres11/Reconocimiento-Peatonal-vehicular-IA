@@ -13,11 +13,14 @@ Complementa la propuesta en borrador `Propuesta_Alcance_VideoTracking_IA_Urbana_
 | Enfoque de modelado | Comparar **YOLO nano, Faster R-CNN y RT-DETR** preentrenados en COCO **sin entrenar**; luego **ajuste fino solo de YOLO nano** y medir cuánto mejora |
 | Clases | Las 6 del borrador: peatón, bicicleta, motocicleta, automóvil, bus, camión |
 | Cómputo | **Colab gratis** para los modelos pesados y el ajuste fino. **PC local** para CVAT, pipeline y tablero. Colab Pro solo si las sesiones gratis se vuelven cuello de botella |
+| Cómputo (actualización) | La GPU AMD del PC servidor (RX 9060 XT) funciona con PyTorch ROCm 7.2.1 en `.venv-rocm`: los 3 modelos corren localmente. Colab queda como respaldo |
 | Anotación | **CVAT local** (Docker) en el PC servidor, acceso del equipo por **Tailscale** |
 | Salida | **CSV + PDF + tablero Streamlit**; local primero, publicado después |
 | Python | **3.12** (misma versión que Colab) |
 | Arquitectura | **Limpia pragmática**: dominio, aplicación, adaptadores y entrada; interfaces solo donde hay más de una implementación. Nombres en inglés en el código |
 | YOLO nano | **YOLO26n** (recomendado hoy por Ultralytics); se cambia con `--weights` |
+| Umbral del tracker (2026-10-07) | 0,3 para YOLO26n y 0,6 para los demás, hasta calibrarlos con datos propios |
+| Comparación (2026-10-07) | Se agrega YOLO26s para separar arquitectura de tamaño. La deduplicación (`--dedup`) se reporta como experimento aparte. ByteTrack queda por defecto; BoT-SORT se probó (E4) sin un ganador claro |
 | Plazo | Sin fecha fija: las fases están ordenadas para que cada una deje algo funcionando |
 | Datos | Clips propios pendientes; mientras tanto se usan datasets públicos (Anexo B) |
 
@@ -84,30 +87,25 @@ Decidida al iniciar la implementación (2026-10-07). Los nombres en el código v
 
 ```
 TrabajoDeCampo/
-├── Docs/                    propuesta, plan, avance, guía de anotación, datasheet
-├── configs/points/          un YAML por punto de cámara (lo único que se calibra)
+├── Docs/                    propuesta, plan, avance, guía de anotación, protocolo de captura, explicaciones
+├── configs/points/          un YAML por punto de cámara: líneas, zonas, restricciones
 ├── vtia/
-│   ├── domain/              reglas puras, sin librerías externas
-│   │   ├── classes.py       6 clases + mapeo COCO
-│   │   ├── models.py        Detection, Line, CrossingEvent
-│   │   └── counting.py      cruce de línea, sentido, clase por mayoría
-│   ├── application/         casos de uso + puertos (interfaces)
-│   │   └── process_video.py
-│   ├── adapters/            todo lo que toca librerías o archivos
-│   │   ├── ultralytics_tracker.py
-│   │   ├── yaml_config.py
-│   │   └── csv_writer.py
-│   └── cli.py               punto de entrada; conecta adaptadores y casos de uso
-├── app/                     Streamlit (Fase 6): otro punto de entrada, misma aplicación
-├── notebooks/               Colab: inferencia de modelos pesados y ajuste fino
+│   ├── domain/              reglas puras: clases, entidades, conteo, zonas, alertas, hora, evaluación
+│   ├── application/         casos de uso: analizar video, resumen del reporte, evaluar; puertos Detector/Tracker
+│   ├── adapters/            detectores, trackers, video, YAML, CSV, PDF, gráficas, VisDrone, métricas
+│   ├── compose.py           arma adaptadores + casos de uso (compartido por consola y tablero)
+│   └── cli.py               consola: count, evaluate
+├── app/dashboard.py         tablero Streamlit: otro punto de entrada, misma aplicación
+├── notebooks/               Colab, si se necesita (hoy la GPU local alcanza)
 ├── tests/                   una prueba por cada lógica no trivial
 └── data/                    NO va a git
 ```
 
 - **Regla de dependencias:** `domain` no importa nada fuera de sí mismo; `application` solo importa `domain`; `adapters` y `cli` pueden importar todo.
-- **Interfaces solo donde hay más de una implementación.** El puerto `Tracker` tendrá tres: YOLO, RT-DETR y Faster R-CNN.
+- **Interfaces solo donde hay más de una implementación.** `Detector` tiene tres (YOLO, RT-DETR, Faster R-CNN) y `Tracker` tendrá dos (ByteTrack, BoT-SORT en E4). Las métricas externas (pycocotools, TrackEval) entran al caso de uso como funciones.
+- **Un mismo tracker para todos los detectores** (detectar → trackear, no el tracker interno de Ultralytics), para que la comparación sea justa.
 - **El mapeo de clases va en el código**, no en un YAML (`domain/classes.py`), porque COCO → 6 clases es fijo.
-- **Archivos que irán llegando:** `domain/` (regla de jinete, zonas, alertas), `adapters/` (Faster R-CNN, PDF, anonimización) y `application/` (evaluar, reportar). Cada archivo se divide solo cuando se vuelva difícil de manejar.
+- **Archivos que irán llegando:** `domain/` (regla de jinete), `adapters/` (lector de exportaciones de CVAT, anonimización). Detalle archivo por archivo en el README. Cada archivo se divide solo cuando se vuelva difícil de manejar.
 
 ### 1.5 Infraestructura: dónde corre cada cosa
 
@@ -138,12 +136,13 @@ flowchart TB
 
 | Necesidad | Librería | Motivo |
 |---|---|---|
-| YOLO, RT-DETR, ByteTrack, BoT-SORT | `ultralytics` | Los dos detectores y los dos trackers en una sola dependencia |
+| YOLO, RT-DETR | `ultralytics` | Los dos detectores en una sola dependencia |
+| ByteTrack, BoT-SORT | `trackers` (Roboflow) | Ambos con la misma interfaz; reemplazo oficial del ByteTrack de `supervision`, que se retira en su versión 0.31 |
 | Faster R-CNN | `torchvision` (ResNet-50 FPN v2, pesos COCO) | Implementación de referencia |
 | Lectura de video | `opencv-python` | Estándar |
-| Cruces de línea y zonas | `supervision` | Trae cruce de línea y zonas poligonales listos; evita geometría a mano |
-| Métricas de tracking | `TrackEval` | HOTA, MOTA, MOTP, IDF1, ID switches. Verificar compatibilidad con numpy reciente en Fase 0 |
-| mAP | `pycocotools` o `torchmetrics` | Métrica COCO estándar, incluye AP de objetos pequeños |
+| Cruces de línea | Código propio (`domain/counting.py`) | Lógica pura con pruebas; cuenta una vez por track y usa la clase mayoritaria |
+| Métricas de tracking | `TrackEval` | HOTA, MOTA, MOTP, IDF1, ID switches. Necesita un parche de 3 líneas para numpy 2 (alias `np.float`/`np.int`) |
+| mAP | `pycocotools` | Métrica COCO estándar, incluye AP de objetos pequeños |
 | Matriz de confusión y particiones | `scikit-learn` | Incluye `StratifiedGroupKFold` |
 | Tablas y gráficas | `pandas`, `matplotlib` | Estándar |
 | PDF | `ReportLab` | Python puro; WeasyPrint necesita GTK en Windows |
@@ -371,7 +370,7 @@ flowchart LR
 | Ciudad, puntos de captura y permisos necesarios | F2 |
 | Celulares o cámara, resolución y fps | F2 |
 | Cómo anotar motocarros, chivas, carretas y patinetas | F2 |
-| Método de anonimización | F2 |
+| Método de anonimización (implementado por defecto: cabeza, placa y parabrisas de vehículos cercanos; confirmar con clips reales) | F2 |
 | Umbral mínimo de F1 por clase: 0,60 o 0,65 (la propuesta dice ambos) | F0 |
 | Quién asume I1, I2 e I3 | F0 |
 | Dónde y cómo publicar el tablero | F8 |

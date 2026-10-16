@@ -2,6 +2,8 @@
 
 Fecha: 2026-10-07. Este documento explica lo construido y por qué. La bitácora con el estado al día es [`AVANCE.md`](AVANCE.md).
 
+> **Nota posterior (misma noche, Fase 3a):** el pipeline evolucionó. El comando ahora es `python -m vtia.cli count ...`, el tracking pasó a ser un paso separado (detectar → ByteTrack del paquete `trackers`, igual para todos los modelos) y se agregaron Faster R-CNN y RT-DETR. Lo de abajo describe la primera versión; los cambios están en [`Explicacion_Fase3a.md`](Explicacion_Fase3a.md).
+
 ---
 
 ## 1. Resumen
@@ -45,7 +47,7 @@ video ──► YOLO26n + ByteTrack ──► detecciones con ID por cuadro ─�
 Se ejecuta con un comando:
 
 ```powershell
-python -m vtia.cli data\samples\vehicles.mp4 --lines configs\points\sample_vehicles.yaml
+python -m vtia.cli count data\samples\vehicles.mp4 --lines configs\points\sample_vehicles.yaml
 ```
 
 ### 3.2 Arquitectura limpia (pragmática)

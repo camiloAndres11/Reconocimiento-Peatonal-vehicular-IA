@@ -5,6 +5,19 @@ from collections.abc import Iterable
 from vtia.domain.models import CrossingEvent, Detection, Line, Point
 
 
+class ClassVotes:
+    """Majority class of each track so far: absorbs frame-to-frame flicker (car/truck) from the detector."""
+
+    def __init__(self):
+        self._votes: defaultdict[int, Counter] = defaultdict(Counter)
+
+    def add(self, d: Detection) -> None:
+        self._votes[d.track_id][d.road_class] += 1
+
+    def __getitem__(self, track_id: int):
+        return self._votes[track_id].most_common(1)[0][0]
+
+
 def _side(a: Point, b: Point, p: Point) -> float:
     """Cross product: > 0 if p is right of a->b on screen (y grows down), < 0 left, 0 on it."""
     return (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
@@ -15,20 +28,20 @@ class LineCounter:
 
     A crossing needs the anchor to change side between two off-line positions,
     with the movement passing through the segment (not its extension).
-    The class of an event is the track's majority class so far, which absorbs
-    frame-to-frame flicker (car/truck) from the detector.
+    The class of an event is the track's majority class so far (ClassVotes).
     """
 
     def __init__(self, lines: list[Line]):
         self.lines = lines
         self._last: dict[tuple[int, str], tuple[bool, Point]] = {}  # (track, line) -> (right side?, anchor)
         self._counted: set[tuple[int, str]] = set()
-        self._votes: defaultdict[int, Counter] = defaultdict(Counter)
+        self._votes = ClassVotes()
 
     def update(self, detections: Iterable[Detection]) -> list[CrossingEvent]:
+        """`detections` must already carry track ids (output of a tracker)."""
         events = []
         for d in detections:
-            self._votes[d.track_id][d.road_class] += 1
+            self._votes.add(d)
             p = d.anchor
             for line in self.lines:
                 s = _side(line.start, line.end, p)
@@ -45,7 +58,7 @@ class LineCounter:
                 # ponytail: one count per track per line, so jitter on the line doesn't double count;
                 # an object that genuinely crosses back is missed. Revisit if dwell/return trips matter.
                 self._counted.add(key)
-                road_class = self._votes[d.track_id].most_common(1)[0][0]
+                road_class = self._votes[d.track_id]
                 direction = line.to_right if s > 0 else line.to_left
                 events.append(CrossingEvent(d.frame, d.track_id, road_class, line.name, direction))
         return events

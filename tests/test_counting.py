@@ -10,7 +10,7 @@ LINE = Line("main", (0, 100), (200, 100), to_right="down", to_left="up")
 
 def det(frame, x, y, cls=RoadClass.CAR, track=1):
     """Detection whose anchor (bottom-centre) is (x, y)."""
-    return Detection(frame, track, cls, 0.9, (x - 10, y - 20, x + 10, y))
+    return Detection(frame, cls, 0.9, (x - 10, y - 20, x + 10, y), track)
 
 
 def run(*dets):
